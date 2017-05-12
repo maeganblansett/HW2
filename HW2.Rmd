@@ -1,0 +1,130 @@
+---
+title: "HW2"
+author: "Maegan Blansett"
+date: "May 11, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing the Data 
+
+Begin by installing and loading the required packages, contained in the **tidyverse** suite. 
+
+```
+install.packages(tidyverse)
+library(tidyverse)
+```
+
+Next, we can load our data using the readr package. Specify that the data is separated by the "|" character using *read_delim()*. 
+
+```
+gaz_raw <- read_delim("CA_Features_20170401.txt", delim = "|")
+```
+
+Once we have checked out the full data set, we can create a smaller dataset that contains only the values we are interested in using the *select()* function. 
+
+```
+gaz <- select(gaz_raw, FEATURE_ID, FEATURE_NAME, FEATURE_CLASS, STATE_ALPHA, COUNTY_NAME, PRIM_LAT_DEC, PRIM_LONG_DEC, SOURCE_LAT_DEC, SOURCE_LONG_DEC, ELEV_IN_M, MAP_NAME, DATE_CREATED, DATE_EDITED)
+``` 
+
+After we have created our refined dataset, we should double check that it was parsed correctly using *spec()*. Some of the system's guesses don't seem right, so we can fix them using the *parse()* commands. 
+
+```
+gaz$FEATURE_ID <- parse_character(gaz$FEATURE_ID)
+gaz$PRIM_LAT_DEC <- parse_double(gaz$PRIM_LAT_DEC, na = "0")
+gaz$PRIM_LONG_DEC <- parse_double(gaz$PRIM_LONG_DEC, na = "0")
+gaz$SOURCE_LAT_DEC <- parse_double(gaz$SOURCE_LAT_DEC)
+gaz$SOURCE_LONG_DEC <- parse_double(gaz$SOURCE_LONG_DEC)
+gaz$DATE_CREATED <- parse_date(gaz$DATE_CREATED, "%Y-%m-%d")
+gaz$DATE_EDITED <- parse_date(gaz$DATE_EDITED, "%m/%d/%Y")
+``` 
+
+After our data has been parsed, we can continue to filter out the unhelpful components using *filter()*. Let's remove the values that don't have a primary latitude or longitude coordinate, or are not located in California. 
+
+```
+gaz %>% 
+  filter(!is.na(PRIM_LAT_DEC)) %>% 
+  filter(!is.na(PRIM_LONG_DEC)) %>%
+  filter(STATE_ALPHA == "CA")
+```
+
+Once we are satisfied with our newly cleaned up dataset, we can export it to a text file using a pipe delimitor. 
+
+```
+write_delim(gaz, "gaz", delim = "|")
+```
+
+## Analyzing the Data
+
+To find the most frequently occurring feature name, we can use the *table()* function and then *sort()* it in decreasing order. We see that the most frequent value is Church of Christ with 228 entries. 
+
+```
+fn <- sort(table(gaz$FEATURE_NAME), decreasing = TRUE)
+```
+
+Similarly, we can *table()* and *sort()* in ascending order to find the least frequently occurring feature class, and we find that it is Isthmus or Sea, each with 1 entry. 
+
+```
+fc <- sort(table(gaz$FEATURE_CLASS), decreasing = FALSE)
+```
+
+If we also want to know the relative center of each county, we can use the latitude and longitude values that we have. First, group the data by county using *group_by()*. 
+
+```
+counties <- group_by(gaz, COUNTY_NAME)
+```
+Then, use the *summarise()* function to create new columns that calculate the minimum and maximum latitude and longitude values within each county, to create a sort of bounding box.
+
+```
+locations <- summarise(counties, minlat = min(PRIM_LAT_DEC), maxlat = max(PRIM_LAT_DEC), minlong = min(PRIM_LONG_DEC), maxlong = max(PRIM_LONG_DEC))
+```
+
+Finally, take the mean of the minimum and maximum latitude and longitude values for each county to find their centers. 
+
+```
+locations$meanlat <- ""
+locations$meanlong <- ""
+locations$meanlat <- mean(locations$minlat + locations$maxlat)
+locations$meanlong <- mean(locations$minlong + locations$maxlong)
+```
+
+If we wish to explore the amounts of natural vs. man-made features within each county, we can utilize the accompanying feature class descriptions. First, import that data and create a column for a new field. 
+
+```
+features <- read_csv("Class_Code_Definitions.csv") # import data 
+features <- features[,-2] # remove description column
+features$type <- "" # create new column for type 
+colnames(features) <- c("FEATURE_CLASS", "type") # rename column to be joined so it matches our original dataset 
+```
+
+Next, we can define the values for which the new field will be classified as "natural" or "man-made" with an *ifelse()* statement. 
+
+```
+features$type <- ifelse(features$Class %in% c("Airport", "Bridge", "Building", "Canal", "Cemetery", "Census", "Church", "Civil", "Crossing", "Dam", "Harbor", "Hospital", "Levee", "Locale", "Military", "Mine", "Oilfield", "Populated Place", "Post Office", "Reservoir", "School", "Tower", "Trail", "Tunnel", "Well"), "man-made", "natural")
+```
+
+Finally, we can join the newly-created data to our original data using a *left_join()*. Then, we can *filter()* again to create subsets of the data for both natural and man-made feature types, and compare these. 
+
+```
+types <- left_join(gaz, FEATURE_CLASS)
+
+natural <- filter(types, type == "natural")
+natural # 46,312 values 
+
+manmade <- filter(types, type == "man-made")
+manmade # 75,739 values 
+
+total <- 46312 + 75739
+total # 122,051
+
+natfrac <- 46312/122051
+natfrac # 37.94% 
+
+manfrac <- 75739/122051
+manfrac # 62.05% 
+```
+
+In doing so, we find that the data contained mainly man-made features (62%) and fewer natural features (38%). 
